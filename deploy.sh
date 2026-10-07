@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Выкладка tg-digest: Worker на Cloudflare (только /notify) через REST + исполнитель local.mjs на GCP tgproxy (systemd).
-# 2026-10-07 18:52 · v1.11 · Nick Churkin
+# 2026-10-07 22:41 · v1.12 · Nick Churkin
 #
 # Настройки и секреты — секрет tg-digest в Bitwarden Secrets Manager (утилита ~/.local/bin/secret):
 #   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN (права: Workers Scripts Edit, R2 Edit),
@@ -15,14 +15,16 @@ set -a; eval "$S"; set +a; unset S
 NAME=tg-digest
 HOST=$DEPLOY_HOST   # user@host исполнителя (GCP tgproxy)
 API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
-AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+HDR=$(umask 077; mktemp); META=$(umask 077; mktemp); TGCFG=$(umask 077; mktemp)
+trap 'rm -f "$HDR" "$META" "$TGCFG"' EXIT
+printf 'Authorization: Bearer %s\n' "$CLOUDFLARE_API_TOKEN" > "$HDR"
+AUTH=(-H @"$HDR")
 ok() { python3 -c 'import json,sys; d=json.load(sys.stdin); d["success"] or sys.exit(sys.argv[1] + ": " + str(d["errors"]))' "$1"; }
 
 # хранилище — бакет R2 (бесплатно 1 млн записей в месяц против 1000 в сутки у KV): создать, если нет
 curl -s "${AUTH[@]}" "$API/r2/buckets/$NAME" | grep -q '"success":true' ||
   curl -s "${AUTH[@]}" -H 'Content-Type: application/json' -d "{\"name\":\"$NAME\"}" "$API/r2/buckets" | ok bucket
 
-META=$(mktemp); trap 'rm -f "$META"' EXIT; chmod 600 "$META"
 python3 - > "$META" <<'PY'
 import json, os
 secret = lambda n: {'type': 'secret_text', 'name': n, 'text': os.environ[n]}
@@ -45,9 +47,9 @@ curl -s "${AUTH[@]}" -X PUT -H 'Content-Type: application/json' -d '[]' \
 curl -s "${AUTH[@]}" -X POST -H 'Content-Type: application/json' -d '{"enabled":true}' \
   "$API/workers/scripts/$NAME/subdomain" | ok subdomain
 
-TG="https://api.telegram.org/bot$BOT_TOKEN"
+printf 'url = "https://api.telegram.org/bot%s/setMyCommands"\n' "$BOT_TOKEN" > "$TGCFG"
 node -e 'import("./worker.js").then(m => console.log(JSON.stringify({commands: m.COMMANDS.map(([command, description]) => ({command, description}))})))' |
-  curl -s "$TG/setMyCommands" -H 'Content-Type: application/json' -d @- |
+  curl -s -K "$TGCFG" -H 'Content-Type: application/json' -d @- |
   python3 -c 'import json,sys; d=json.load(sys.stdin); d["ok"] or sys.exit("commands: " + str(d))'
 
 # исполнитель на GCP: код, секреты, systemd
