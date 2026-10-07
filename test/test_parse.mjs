@@ -41,7 +41,7 @@ for (const s of ['@kod_ru', 'kod_ru', 't.me/kod_ru', 'https://t.me/kod_ru', 'htt
 // команды без сети: настройки и список
 const kv = new Map([['channels', '["kod_ru","rbc_news"]'], ['last', '{"kod_ru":5}']]);
 const env = { DIGEST: { get: async (k) => (kv.has(k) ? { text: async () => kv.get(k) } : null), put: async (k, v) => kv.set(k, v) } };
-assert.match(await command(env, '/schedule@Nick_ai_bot 20 9 14 99 9'), /9, 14, 20/);
+assert.match(await command(env, '/schedule@your_bot 20 9 14 99 9'), /9, 14, 20/);
 assert.deepEqual(JSON.parse(kv.get('settings')).hours, [9, 14, 20]);
 assert.match(await command(env, '/schedule'), /Сейчас: 9, 14, 20/);
 await command(env, '/focus меньше политики');
