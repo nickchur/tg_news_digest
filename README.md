@@ -10,36 +10,35 @@ Gemini пишет из них дайджест, бот публикует его
   node local.mjs ──────────── R2 REST ──────▶ бакет tg-digest (состояние)
    ├─ каждые 15 мин: сбор → пул, проверка 🚨
    ├─ в часы выпуска: Gemini → дайджест → группа
-   └─ long polling: команды бота               Worker tg-digest: только POST /notify
+   └─ long polling: команды бота
 ```
 
 - `worker.js` — весь код дайджеста: сбор, пул, Gemini, публикация, тревоги, команды бота. Написан как
   Cloudflare Worker, но по расписанию его исполняет `local.mjs`.
 - `local.mjs` — исполнитель на ВМ: подставляет R2 через REST API Cloudflare, вызывает `scheduled` на границах
   четверти часа, забирает команды бота long polling'ом. `node local.mjs run` — разовый выпуск и выход.
-- На Cloudflare от Worker'а остался только `POST /notify?key=<ADMIN_KEY>` (тело — текст, HTML можно): сообщение
-  владельцу в личку. Его зовут внешние проверки и скрипты.
+- На Cloudflare — только бакет R2 с состоянием. Уведомления о прокси — отдельный проект tg_proxy_check.
 
 Почему не всё на Cloudflare: бесплатный Workers ограничивает вызов 10 мс CPU, а сбор с разбором лент тратит
 около 90 мс. Платный тариф ($5/мес) снял бы ограничение; здесь вместо него — бесплатная ВМ.
 
 | Файл | Что |
 |---|---|
-| `worker.js` | код дайджеста и обработчик `/notify` |
+| `worker.js` | код дайджеста |
 | `local.mjs` | исполнитель на ВМ |
-| `deploy.sh` | выкладка: бакет R2, Worker `/notify`, меню команд бота; на ВМ — код, `/etc/tg-digest.env`, systemd-юнит |
+| `deploy.sh` | выкладка: бакет R2, меню команд бота; на ВМ — код, `/etc/tg-digest.env`, systemd-юнит |
 | `test/test_parse.mjs` | `node test/test_parse.mjs` — разбор ленты и RSS, листание, разбивка, команды |
 
 ## Что нужно для своей копии
 
-- аккаунт Cloudflare: R2 и Workers (бесплатно), API-токен с правами Workers Scripts Edit и R2 Edit;
+- аккаунт Cloudflare: R2 (бесплатно), API-токен с правом R2 Edit;
 - ВМ с Node 18+ и systemd, вход по ssh с правом sudo (подойдёт e2-micro из бесплатного тарифа GCP);
 - бот Telegram (токен от @BotFather), группа или канал для выпусков, где бот — участник с правом писать;
 - ключ Gemini API.
 
 Настройки `deploy.sh` берёт из менеджера секретов (`secret tg-digest`; ключ Gemini — `secret agy`) — строки
 `ИМЯ=значение`: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `BOT_TOKEN`, `TARGET_CHAT` (куда публиковать),
-`OWNER_ID` (числовой id владельца — бот слушает только его), `ADMIN_KEY` (ключ `/notify`), `GEMINI_MODEL`
+`OWNER_ID` (числовой id владельца — бот слушает только его), `GEMINI_MODEL`
 (модели через запятую — откат на следующую при ошибке), `DEPLOY_HOST` (`claude@host` ВМ — юнит systemd пишется
 под пользователя `claude` и каталог `/home/claude/tg-digest`; другой пользователь — поправьте юнит в `deploy.sh`),
 `GEMINI_API_KEY`.

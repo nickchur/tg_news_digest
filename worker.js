@@ -1,5 +1,5 @@
 // tg-digest — дайджест Telegram-каналов и RSS: каждые 15 минут сбор в пул, по расписанию выпуск → Gemini → группа.
-// 2026-10-07 18:52 · v1.11 · Nick Churkin
+// 2026-10-08 00:46 · v1.12 · Nick Churkin
 //
 // R2 `DIGEST` (бакет tg-digest; ключ = объект с JSON): источники — `channels` (свои, [мой]), `background` (мир, [мир]), `tech` (технологии, [тех]):
 //              юзернеймы каналов с открытой лентой t.me/s или URL RSS-лент;
@@ -9,12 +9,9 @@
 //              `alerts` — объявленные тревоги за двое суток [{at, title, urls}].
 // Где крутится (с 04.10): бесплатный Workers режет вызов на 10 мс CPU, а сбор тратит ~90 мс — поэтому `scheduled`
 // и команды бота исполняет local.mjs на GCP tgproxy (Node, R2 через REST, long polling Telegram).
-// На Cloudflare остался только fetch: POST /notify?key=<ADMIN_KEY>, тело — текст (HTML можно) — сообщение владельцу.
 // Каждые 15 минут: сбор всех источников в пул и проверка на экстренное (🚨 сразу в группу);
 // в первую четверть часа из settings.hours, не на паузе — выпуск из неопубликованного (тогда без проверки:
 // её сделает следующий сбор — окно тревог ALERT_HOURS). Команды — только от OWNER_ID, долгие (SLOW) — с «⏳» вперёд.
-// Семейные MTProto-прокси: каждый cron — TCP до каждого из PROXIES; PROXY_FAILS неудач подряд — ⚠️ владельцу, ожил — ✅.
-// Туннель за прокси проверяет сам стенд (mtg-check) и шлёт через /notify.
 
 // Лимит бесплатного Workers — 50 подзапросов за вызов. Сбор тратит не больше BUDGET: страница на источник,
 // своим — вторая, если первая вся новая; не хватило — источник ждёт следующего часа. Остаток — Gemini и отправка.
@@ -30,10 +27,6 @@ const LABEL = { mine: 'мой', world: 'мир', tech: 'тех' };
 const ALERT_MODELS = 'gemini-flash-lite-latest,gemini-flash-latest';  // проверка дешёвая и частая — лёгкая модель
 const ALERT_HOURS = 2;        // тревогу ищем в материалах за столько часов (второй источник мог прийти раньше)
 const ALERT_KEEP_HOURS = 48;
-// PROXIES — env, «host:port,host:port»; пусто — проверка выключена
-const proxies = (env) => (env.PROXIES ?? '').split(',').filter(Boolean)
-  .map((p) => { const [hostname, port = 443] = p.trim().split(':'); return { hostname, port: +port }; });
-const PROXY_FAILS = 2;        // подряд неудач до тревоги (30 мин): перезагрузка стенда — не повод  // столько помним объявленное, чтобы не повторять
 
 const PROMPT = `Ты — шеф-редактор новостного Telegram-канала. Составь дайджест главного по публикациям
 из разных каналов ниже: что интересного происходит в мире.
@@ -476,29 +469,8 @@ export async function onUpdate(env, update) {
   await sendLong(env, msg.chat.id, reply);
 }
 
-// Порт прокси открывается за 10 с? Состояние в R2 `proxy:<host>` — {fails, down}; пишем только при изменении.
-async function checkProxy(env, proxy) {
-  let ok = false;
-  try {
-    // в node (local.mjs) — env.SOCKETS на net; динамически, потому что тесты и deploy.sh грузят модуль в node
-    const { connect } = env.SOCKETS ?? await import('cloudflare:sockets');
-    const sock = connect(proxy);
-    ok = await Promise.race([sock.opened.then(() => true), new Promise((r) => setTimeout(r, 10000, false))]);
-    sock.close().catch(() => {});
-  } catch { /* ok = false */ }
-  const key = `proxy:${proxy.hostname}`;
-  const was = await getJson(env, key, { fails: 0, down: false });
-  const now = ok ? { fails: 0, down: false } : { fails: was.fails + 1, down: was.down || was.fails + 1 >= PROXY_FAILS };
-  if (now.fails === was.fails && now.down === was.down) return;
-  await env.DIGEST.put(key, JSON.stringify(now));
-  const where = `${proxy.hostname}:${proxy.port}`;
-  if (now.down && !was.down) await send(env, env.OWNER_ID, `⚠️ Прокси ${where} не отвечает ${now.fails * 15} мин`);
-  if (!now.down && was.down) await send(env, env.OWNER_ID, `✅ Прокси ${where} снова отвечает`);
-}
-
 export default {
   async scheduled(event, env) {
-    await Promise.all(proxies(env).map((p) => checkProxy(env, p).catch((e) => console.log(`прокси ${p.hostname}: ${e.message}`))));
     const { hours, paused, alerts } = await settingsOf(env);
     const t = new Date(event.scheduledTime);
     const hour = +t.toLocaleString('en-US', { timeZone: 'Europe/Moscow', hour: 'numeric', hourCycle: 'h23' });
@@ -513,15 +485,5 @@ export default {
     }
     const res = await run(env);
     console.log(JSON.stringify({ ...res, digest: res.digest.length }));
-  },
-
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (url.pathname !== '/notify') return new Response('tg-digest', { status: 404 });
-    if (!env.ADMIN_KEY || url.searchParams.get('key') !== env.ADMIN_KEY) return new Response('forbidden', { status: 403 });
-    const text = (await request.text()).trim();
-    if (!text) return new Response('empty', { status: 400 });
-    await sendLong(env, env.OWNER_ID, text);
-    return new Response('ok');
   },
 };

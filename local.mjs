@@ -1,12 +1,11 @@
 // Исполнитель tg-digest вне Cloudflare: бесплатный Workers режет вызов на 10 мс CPU, а сбор тратит ~90 мс.
-// 2026-10-04 10:14 · v1.10 · Nick Churkin
+// 2026-10-08 00:46 · v1.12 · Nick Churkin
 //
 // Крутится на GCP tgproxy (systemd tg-digest): long polling Telegram → onUpdate, на каждой границе четверти часа —
-// тот же `scheduled`, что был у Worker'а. R2 — через REST Cloudflare (токен Workers/R2 из tg-digest).
+// тот же `scheduled`, что был у Worker'а. R2 — через REST Cloudflare (токен R2 из tg-digest).
 // Окружение — как у Worker'а: BOT_TOKEN, GEMINI_API_KEY, GEMINI_MODEL, TARGET_CHAT, OWNER_ID,
 // CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN.
 // `node local.mjs run` — разовый выпуск (сбор + публикация) и выход.
-import net from 'node:net';
 import worker, { onUpdate, run } from './worker.js';
 
 const env = { ...process.env };
@@ -27,15 +26,6 @@ env.DIGEST = {
   },
 };
 
-// cloudflare:sockets.connect для checkProxy
-env.SOCKETS = {
-  connect({ hostname, port }) {
-    const s = net.connect(port, hostname);
-    const opened = new Promise((ok, fail) => { s.once('connect', ok); s.once('error', fail); });
-    opened.catch(() => {});
-    return { opened, close: async () => s.destroy() };
-  },
-};
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const tg = async (method, params) => {
