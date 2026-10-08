@@ -1,5 +1,5 @@
 // Исполнитель tg-digest вне Cloudflare: бесплатный Workers режет вызов на 10 мс CPU, а сбор тратит ~90 мс.
-// 2026-10-08 00:46 · v1.12 · Nick Churkin
+// 2026-10-08 08:53 · v1.13 · Nick Churkin
 //
 // Крутится на GCP tgproxy (systemd tg-digest): long polling Telegram → onUpdate, на каждой границе четверти часа —
 // тот же `scheduled`, что был у Worker'а. R2 — через REST Cloudflare (токен R2 из tg-digest).
@@ -25,7 +25,6 @@ env.DIGEST = {
     if (!r.ok) throw new Error(`R2 put ${key}: ${r.status} ${await r.text()}`);
   },
 };
-
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const tg = async (method, params) => {

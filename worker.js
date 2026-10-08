@@ -1,5 +1,5 @@
 // tg-digest — дайджест Telegram-каналов и RSS: каждые 15 минут сбор в пул, по расписанию выпуск → Gemini → группа.
-// 2026-10-08 00:46 · v1.12 · Nick Churkin
+// 2026-10-08 08:53 · v1.13 · Nick Churkin
 //
 // R2 `DIGEST` (бакет tg-digest; ключ = объект с JSON): источники — `channels` (свои, [мой]), `background` (мир, [мир]), `tech` (технологии, [тех]):
 //              юзернеймы каналов с открытой лентой t.me/s или URL RSS-лент;
@@ -26,7 +26,7 @@ const TIERS = { channels: 'mine', background: 'world', tech: 'tech' };
 const LABEL = { mine: 'мой', world: 'мир', tech: 'тех' };
 const ALERT_MODELS = 'gemini-flash-lite-latest,gemini-flash-latest';  // проверка дешёвая и частая — лёгкая модель
 const ALERT_HOURS = 2;        // тревогу ищем в материалах за столько часов (второй источник мог прийти раньше)
-const ALERT_KEEP_HOURS = 48;
+const ALERT_KEEP_HOURS = 48;  // столько помним объявленное, чтобы не повторять
 
 const PROMPT = `Ты — шеф-редактор новостного Telegram-канала. Составь дайджест главного по публикациям
 из разных каналов ниже: что интересного происходит в мире.

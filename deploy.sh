@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Выкладка tg-digest: бакет R2 на Cloudflare + исполнитель local.mjs на GCP tgproxy (systemd).
-# 2026-10-08 00:46 · v1.13 · Nick Churkin
+# 2026-10-08 08:53 · v1.14 · Nick Churkin
 #
 # Настройки и секреты — секрет tg-digest в Bitwarden Secrets Manager (утилита ~/.local/bin/secret):
 #   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN (права: R2 Edit),
@@ -14,15 +14,18 @@ set -a; eval "$S"; set +a; unset S
 
 HOST=$DEPLOY_HOST   # user@host исполнителя (GCP tgproxy)
 API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+HDR= TGCFG=; trap 'rm -f "$HDR" "$TGCFG"' EXIT
 HDR=$(umask 077; mktemp); TGCFG=$(umask 077; mktemp)
-trap 'rm -f "$HDR" "$TGCFG"' EXIT
 printf 'Authorization: Bearer %s\n' "$CLOUDFLARE_API_TOKEN" > "$HDR"
 AUTH=(-H @"$HDR")
 ok() { python3 -c 'import json,sys; d=json.load(sys.stdin); d["success"] or sys.exit(sys.argv[1] + ": " + str(d["errors"]))' "$1"; }
 
 # хранилище — бакет R2 (бесплатно 1 млн записей в месяц против 1000 в сутки у KV): создать, если нет
-curl -s "${AUTH[@]}" "$API/r2/buckets/tg-digest" | grep -q '"success":true' ||
-  curl -s "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"name":"tg-digest"}' "$API/r2/buckets" | ok bucket
+case $(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$API/r2/buckets/tg-digest") in
+  200) ;;
+  404) curl -sS "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"name":"tg-digest"}' "$API/r2/buckets" | ok bucket ;;
+  *) echo "R2: не удалось проверить бакет tg-digest" >&2; exit 1 ;;
+esac
 
 printf 'url = "https://api.telegram.org/bot%s/setMyCommands"\n' "$BOT_TOKEN" > "$TGCFG"
 node -e 'import("./worker.js").then(m => console.log(JSON.stringify({commands: m.COMMANDS.map(([command, description]) => ({command, description}))})))' |
